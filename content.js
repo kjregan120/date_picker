@@ -1,115 +1,117 @@
-// ---- helpers ---------------------------------------------------------------
+(() => {
+  const IS_TOP = self === top;
 
-function resortSlugFromPath(pathname = location.pathname) {
-  // grabs whatever is after /resorts/ and before /rates-rooms
-  const m = pathname.match(/\/resorts\/([^/]+)(?=\/rates-rooms|\/?$)/i);
-  return m ? m[1] : null;
-}
+  // ------------------- helpers -------------------
+  const pad = n => String(n).padStart(2, "0");
 
-function unixSecToISOString(sec) {
-  if (!sec || isNaN(sec)) return null;
-  // disney component uses seconds since epoch; convert to ms
-  const d = new Date(Number(sec) * 1000);
-  return isNaN(d.getTime()) ? null : d.toISOString();
-}
-
-function mmddyyyyToISO(str) {
-  // fallback if we only see "MM/dd/yyyy" in an input
-  if (!str) return null;
-  const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!m) return null;
-  const [ , mm, dd, yyyy ] = m.map(Number);
-  const d = new Date(yyyy, mm - 1, dd);
-  return isNaN(d.getTime()) ? null : d.toISOString();
-}
-
-function logPayload(source, { resort, checkInISO, checkOutISO }) {
-  console.log(`[Disney Dates Grabber] (${source})`, {
-    resort,
-    checkInISO,
-    checkOutISO
-  });
-}
-
-// ---- core extraction --------------------------------------------------------
-
-function extractFromDatepicker(el) {
-  if (!el) return { checkInISO: null, checkOutISO: null };
-
-  // 1) try attributes (kebab-case)
-  let fromAttr = el.getAttribute('date-from');
-  let toAttr   = el.getAttribute('date-to');
-
-  // 2) try JS properties (camelCase) exposed by the web component
-  // (some frameworks reflect to properties instead of attributes)
-  let fromProp = el.dateFrom ?? el.from ?? el.start ?? null;
-  let toProp   = el.dateTo   ?? el.to   ?? el.end   ?? null;
-
-  // prefer attributes if present; else properties
-  const fromRaw = fromAttr ?? fromProp;
-  const toRaw   = toAttr   ?? toProp;
-
-  let checkInISO  = unixSecToISOString(fromRaw);
-  let checkOutISO = unixSecToISOString(toRaw);
-
-  // 3) fallback: peek into shadow DOM for text inputs like "MM/dd/yyyy"
-  // names and structure may vary; we try a few selectors defensively.
-  if ((!checkInISO || !checkOutISO) && el.shadowRoot) {
-    const fromInput = el.shadowRoot.querySelector('input[name="from"], input#from, input[name="date-from"]');
-    const toInput   = el.shadowRoot.querySelector('input[name="to"],   input#to,   input[name="date-to"]');
-
-    if (!checkInISO && fromInput?.value)  checkInISO  = mmddyyyyToISO(fromInput.value);
-    if (!checkOutISO && toInput?.value)   checkOutISO = mmddyyyyToISO(toInput.value);
+  // format as ISO UTC with milliseconds: "YYYY-MM-DDTHH:mm:ss.000Z"
+  function toISO(d) {
+    return d instanceof Date && !isNaN(d) ? d.toISOString().replace(/\.\d{3}Z$/, ".000Z") : null;
   }
 
-  return { checkInISO, checkOutISO };
-}
+  // turn epoch seconds (as string or number) into ISO
+  const secToISO = sec => (sec != null && isFinite(sec)) ? toISO(new Date(Number(sec) * 1000)) : null;
 
-function getAndLog() {
-  const dp =
-    document.querySelector('wdpr-range-datepicker#rangeDatePicker') ||
-    document.querySelector('wdpr-range-datepicker');
-
-  const resort = resortSlugFromPath();
-  const { checkInISO, checkOutISO } = extractFromDatepicker(dp);
-
-  logPayload(dp ? 'found-element' : 'no-element-yet', { resort, checkInISO, checkOutISO });
-}
-
-// ---- observers & listeners --------------------------------------------------
-
-// run once at idle (in case it’s already on the page)
-getAndLog();
-
-// watch DOM for the datepicker appearing later (SPA hydration / route changes)
-const domObserver = new MutationObserver(() => {
-  const dp = document.querySelector('wdpr-range-datepicker#rangeDatePicker, wdpr-range-datepicker');
-  if (dp) {
-    getAndLog();
-
-    // also observe attribute changes on the component (when dates change)
-    const attrObserver = new MutationObserver(() => getAndLog());
-    attrObserver.observe(dp, { attributes: true, attributeFilter: ['date-from', 'date-to'] });
-
-    // and generic change/input bubbling from within the component
-    dp.addEventListener('change', getAndLog, true);
-    dp.addEventListener('input',  getAndLog, true);
-
-    // optional: listen for custom events if they exist (guessing common names)
-    dp.addEventListener('valueChanged', getAndLog, true);
-    dp.addEventListener('wdprChange',  getAndLog, true);
-
-    // no need to watch the whole DOM anymore
-    domObserver.disconnect();
+  function parseMMDDYYYY(s) {
+    const m = String(s || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!m) return null;
+    const [, mm, dd, yyyy] = m.map(Number);
+    const d = new Date(yyyy, mm - 1, dd, 0, 0, 0, 0);
+    return isNaN(d) ? null : d;
   }
-});
-domObserver.observe(document.documentElement, { childList: true, subtree: true });
 
-// as a final fallback, re-run on SPA navigations that don’t reload the page
-let lastPath = location.pathname;
-setInterval(() => {
-  if (location.pathname !== lastPath) {
-    lastPath = location.pathname;
-    getAndLog();
+  function resortSlugFromTopPath() {
+    // Only safe in top frame
+    const m = location.pathname.match(/\/resorts\/([^/]+)\/rates-rooms/);
+    return m ? m[1] : null;
   }
-}, 1000);
+
+  // ------------------- date extraction -------------------
+  function extractFromAttributes(el) {
+    const fromAttr = el.getAttribute("date-from");
+    const toAttr   = el.getAttribute("date-to");
+    const fromISO  = secToISO(fromAttr);
+    const toISO    = secToISO(toAttr);
+    if (fromISO || toISO) return { source: "attributes", checkInISO: fromISO, checkOutISO: toISO };
+    return null;
+  }
+
+  function extractFromProperties(el) {
+    const cands = [
+      ["dateFrom","dateTo"], ["from","to"], ["start","end"],
+      ["startDate","endDate"], ["valueFrom","valueTo"], ["selectedFrom","selectedTo"]
+    ];
+    for (const [pf, pt] of cands) {
+      const f = el[pf], t = el[pt];
+      let inISO = null, outISO = null;
+
+      if (typeof f === "number" || typeof t === "number") {
+        inISO  = secToISO(f);
+        outISO = secToISO(t);
+      } else if (f instanceof Date || t instanceof Date) {
+        inISO  = toISO(f);
+        outISO = toISO(t);
+      } else if (typeof f === "string" || typeof t === "string") {
+        const fd = parseMMDDYYYY(f);
+        const td = parseMMDDYYYY(t);
+        inISO  = toISO(fd);
+        outISO = toISO(td);
+      }
+
+      if (inISO || outISO) return { source: `props(${pf}/${pt})`, checkInISO: inISO, checkOutISO: outISO };
+    }
+
+    // array style (selectedDates)
+    if (Array.isArray(el.selectedDates) && el.selectedDates.length >= 2) {
+      const [a, b] = el.selectedDates;
+      const A = a instanceof Date ? a : (typeof a === "number" ? new Date(a * 1000) : parseMMDDYYYY(a));
+      const B = b instanceof Date ? b : (typeof b === "number" ? new Date(b * 1000) : parseMMDDYYYY(b));
+      const inISO  = toISO(A);
+      const outISO = toISO(B);
+      if (inISO || outISO) return { source: "props(selectedDates)", checkInISO: inISO, checkOutISO: outISO };
+    }
+    return null;
+  }
+
+  function extractFromShadow(el) {
+    if (!el.shadowRoot) return null;
+    // Try common inputs. We avoid tight selectors because markup can churn.
+    const sr = el.shadowRoot;
+    const fromHidden = sr.querySelector('input[type="hidden"][name*="from" i]');
+    const toHidden   = sr.querySelector('input[type="hidden"][name*="to" i]');
+    let inISO  = fromHidden?.value && /^\d+$/.test(fromHidden.value) ? secToISO(Number(fromHidden.value)) : null;
+    let outISO = toHidden?.value   && /^\d+$/.test(toHidden.value)   ? secToISO(Number(toHidden.value))   : null;
+
+    const fromInput = sr.querySelector('input[placeholder*="Check In" i], input[aria-label*="Check In" i], input[name*="from" i]');
+    const toInput   = sr.querySelector('input[placeholder*="Check Out" i], input[aria-label*="Check Out" i], input[name*="to" i]');
+    if (!inISO  && fromInput?.value) inISO  = toISO(parseMMDDYYYY(fromInput.value));
+    if (!outISO && toInput?.value)   outISO = toISO(parseMMDDYYYY(toInput.value));
+
+    if (inISO || outISO) return { source: "shadow", checkInISO: inISO, checkOutISO: outISO };
+    return null;
+  }
+
+  function extractDates(el) {
+    return (
+      extractFromAttributes(el) ||
+      extractFromProperties(el) ||
+      extractFromShadow(el) ||
+      { source: null, checkInISO: null, checkOutISO: null }
+    );
+  }
+
+  function findPicker() {
+    // Don’t assume an id – just the tag.
+    return document.querySelector("wdpr-range-datepicker");
+  }
+
+  // ------------------- messaging + logging -------------------
+  function sendDatesUp(payload) {
+    // Send to background; it will forward to TOP frame for logging with slug
+    chrome.runtime.sendMessage({ type: "DATES_FOUND", payload });
+  }
+
+  if (IS_TOP) {
+    // Top frame logs combined payload (resort slug + dates)
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg?.type !== "DATES_FO_
