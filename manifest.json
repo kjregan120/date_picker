@@ -1,15 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "Disney Date + Resort Grabber",
-  "version": "1.2",
-  "description": "Extracts resort slug and date range from wdpr-range-datepicker and logs them.",
+  "name": "Disney Dates Grabber",
+  "version": "1.0.0",
+  "description": "Logs resort slug + check-in/out dates from disneyworld.com SPA.",
+  "permissions": [],
+  "host_permissions": [
+    "https://disneyworld.disney.go.com/*"
+  ],
   "content_scripts": [
     {
-      "matches": ["https://*.disney.go.com/*"],
+      "matches": ["https://disneyworld.disney.go.com/*"],
       "js": ["content.js"],
-      "all_frames": true,
       "run_at": "document_idle"
     }
   ]
 }
-
