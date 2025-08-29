@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Disney Date Grabber",
-  "version": "1.0",
-  "description": "Extracts datepicker values and logs them to the console.",
+  "name": "Disney Date + Resort Grabber",
+  "version": "1.1",
+  "description": "Extracts the resort slug and datepicker values and logs them to the console.",
   "permissions": ["scripting"],
   "content_scripts": [
     {
