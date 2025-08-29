@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Disney Date Grabber",
+  "version": "1.0",
+  "description": "Extracts datepicker values and logs them to the console.",
+  "permissions": ["scripting"],
+  "content_scripts": [
+    {
+      "matches": ["https://disneyworld.disney.go.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
