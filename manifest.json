@@ -1,13 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Disney Date + Resort Grabber",
-  "version": "1.1",
-  "description": "Extracts the resort slug and datepicker values and logs them to the console.",
-  "permissions": ["scripting"],
+  "version": "1.2",
+  "description": "Extracts resort slug and date range from wdpr-range-datepicker and logs them.",
   "content_scripts": [
     {
-      "matches": ["https://disneyworld.disney.go.com/*"],
-      "js": ["content.js"]
+      "matches": ["https://*.disney.go.com/*"],
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
     }
   ]
 }
+
