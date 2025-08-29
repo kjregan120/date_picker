@@ -114,4 +114,62 @@
   if (IS_TOP) {
     // Top frame logs combined payload (resort slug + dates)
     chrome.runtime.onMessage.addListener((msg) => {
-      if (msg?.type !== "DATES_FO_
+      if (msg?.type !== "DATES_FOUND") return;
+      const resort = resortSlugFromTopPath();
+      const { checkInISO, checkOutISO, source, frameURL } = msg.payload;
+      console.log("[Disney Dates] resort:", resort, "| source:", source, "| frame:", frameURL, "| check-in:", checkInISO, "| check-out:", checkOutISO);
+    });
+  }
+
+  // ------------------- main -------------------
+  function work() {
+    const picker = findPicker();
+    if (!picker) return;
+
+    const { source, checkInISO, checkOutISO } = extractDates(picker);
+
+    // If we found anything, report upward (include which frame it was)
+    if (source && (checkInISO || checkOutISO)) {
+      const frameURL = location.href;
+      sendDatesUp({ source, checkInISO, checkOutISO, frameURL });
+
+      // Keep updates flowing when user changes dates
+      const obs = new MutationObserver((muts) => {
+        if (muts.some(m => m.type === "attributes" && (m.attributeName === "date-from" || m.attributeName === "date-to"))) {
+          const res = extractDates(picker);
+          const payload = { ...res, frameURL: location.href };
+          sendDatesUp(payload);
+        }
+      });
+      obs.observe(picker, { attributes: true, attributeFilter: ["date-from", "date-to"] });
+
+      // Also react to input/change inside the component (if open shadow)
+      if (picker.shadowRoot) {
+        picker.shadowRoot.addEventListener("input",  () => sendDatesUp({ ...extractDates(picker), frameURL: location.href }), true);
+        picker.shadowRoot.addEventListener("change", () => sendDatesUp({ ...extractDates(picker), frameURL: location.href }), true);
+      }
+    }
+  }
+
+  // Run once, then keep trying for a bit while the SPA hydrates
+  work();
+  let attempts = 0;
+  const iv = setInterval(() => {
+    attempts += 1;
+    if (findPicker()) {
+      work();
+      clearInterval(iv);
+    } else if (attempts > 40) {
+      clearInterval(iv); // ~20s max
+    }
+  }, 500);
+
+  // Watch for picker being added later (route changes / lazy load)
+  const mo = new MutationObserver(() => {
+    if (findPicker()) {
+      work();
+      mo.disconnect();
+    }
+  });
+  mo.observe(document.documentElement, { childList: true, subtree: true });
+})();
